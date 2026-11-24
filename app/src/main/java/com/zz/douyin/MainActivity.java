@@ -25,11 +25,27 @@ import io.github.libxposed.service.XposedService;
 
 public final class MainActivity extends Activity
         implements ModuleApplication.ServiceStateListener {
-    private static final int BACKGROUND = Color.rgb(16, 17, 20);
-    private static final int CARD = Color.rgb(28, 29, 34);
-    private static final int PRIMARY = Color.rgb(254, 44, 85);
-    private static final int TEXT_PRIMARY = Color.rgb(245, 245, 248);
-    private static final int TEXT_SECONDARY = Color.rgb(169, 171, 180);
+    // 与 DouyinDownloader 对齐的配色，定义在 res/values{,-night}/colors_douyin.xml。
+    // 用 getColor 而不是常量：系统切成深色时自动换一套，不用重建 Activity。
+    private int BACKGROUND, CARD, CARD_STROKE, PRIMARY, TEXT_PRIMARY, TEXT_SECONDARY, TEXT_TERTIARY;
+    private int INPUT_FILL, INPUT_STROKE, DIVIDER, CHIP_IDLE, CHIP_ACTIVE, STATUS_OK, STATUS_WARN;
+
+    private void loadColors() {
+        BACKGROUND     = getColor(R.color.bg_base);
+        CARD           = getColor(R.color.card_fill);
+        CARD_STROKE    = getColor(R.color.card_stroke);
+        PRIMARY        = getColor(R.color.accent);
+        TEXT_PRIMARY   = getColor(R.color.text_primary);
+        TEXT_SECONDARY = getColor(R.color.text_secondary);
+        TEXT_TERTIARY  = getColor(R.color.text_tertiary);
+        INPUT_FILL     = getColor(R.color.input_fill);
+        INPUT_STROKE   = getColor(R.color.input_stroke);
+        DIVIDER        = getColor(R.color.divider);
+        CHIP_IDLE      = getColor(R.color.chip_idle);
+        CHIP_ACTIVE    = getColor(R.color.chip_active);
+        STATUS_OK      = getColor(R.color.status_ok);
+        STATUS_WARN    = getColor(R.color.status_warn);
+    }
 
     /** 清晰度选项：偏好值与界面文案一一对应。 */
     private static final String[] QUALITY_VALUES = {
@@ -60,6 +76,9 @@ public final class MainActivity extends Activity
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        // getColor 依赖已初始化的 Context，必须放在 super.onCreate 之后。
+        // 但要在 buildContent 之前：卡片和文字的颜色都从这些字段取。
+        loadColors();
         setContentView(buildContent());
         setControlsEnabled(false);
     }
@@ -199,7 +218,7 @@ public final class MainActivity extends Activity
 
         keywordInput = new EditText(this);
         keywordInput.setTextColor(TEXT_PRIMARY);
-        keywordInput.setHintTextColor(Color.rgb(112, 114, 123));
+        keywordInput.setHintTextColor(TEXT_TERTIARY);
         keywordInput.setTextSize(16);
         keywordInput.setHint("例如：游戏推广\n不感兴趣\n带货");
         keywordInput.setGravity(Gravity.TOP | Gravity.START);
@@ -210,8 +229,8 @@ public final class MainActivity extends Activity
                         | InputType.TYPE_TEXT_FLAG_MULTI_LINE
                         | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
         );
-        GradientDrawable inputBackground = rounded(Color.rgb(38, 39, 45), 12);
-        inputBackground.setStroke(dp(1), Color.rgb(58, 60, 68));
+        GradientDrawable inputBackground = rounded(CHIP_IDLE, 12);
+        inputBackground.setStroke(dp(1), INPUT_STROKE);
         keywordInput.setBackground(inputBackground);
         keywordInput.setPadding(dp(14), dp(12), dp(14), dp(12));
         LinearLayout.LayoutParams inputParams = matchWrap();
@@ -251,7 +270,7 @@ public final class MainActivity extends Activity
         if (service == null) {
             preferences = null;
             serviceStatus.setText("未连接 LSPosed 服务，设置暂不可修改");
-            serviceStatus.setTextColor(Color.rgb(255, 166, 77));
+            serviceStatus.setTextColor(STATUS_WARN);
             setControlsEnabled(false);
             loading = false;
             return;
@@ -277,7 +296,7 @@ public final class MainActivity extends Activity
                 "已连接 " + service.getFrameworkName()
                         + " · API " + service.getApiVersion()
         );
-        serviceStatus.setTextColor(Color.rgb(84, 214, 142));
+        serviceStatus.setTextColor(STATUS_OK);
         setControlsEnabled(true);
         loading = false;
     }
@@ -354,11 +373,11 @@ public final class MainActivity extends Activity
             Button chip = qualityChips.get(index);
             boolean active = QUALITY_VALUES[index].equals(selected);
             GradientDrawable background = rounded(
-                    active ? PRIMARY : Color.rgb(38, 39, 45),
+                    active ? PRIMARY : CHIP_IDLE,
                     18
             );
             if (!active) {
-                background.setStroke(dp(1), Color.rgb(58, 60, 68));
+                background.setStroke(dp(1), INPUT_STROKE);
             }
             chip.setBackground(background);
             chip.setTextColor(active ? Color.WHITE : TEXT_SECONDARY);
@@ -465,17 +484,26 @@ public final class MainActivity extends Activity
         saveKeywords.setAlpha(enabled ? 1f : 0.45f);
     }
 
+    /**
+     * 玻璃卡片。
+     *
+     * 传统 View 拿不到背后内容的像素，做不出真 backdrop blur。这里用「半透明填充 +
+     * 1dp 细描边 + 20dp 圆角」近似：背景的暖光能微微透上来，不至于是一块死色。
+     * 圆角取 20dp（与下载器的 BgRadius.r3 一致），比原来的 16dp 更接近胶囊感。
+     */
     private LinearLayout card() {
         LinearLayout layout = new LinearLayout(this);
         layout.setOrientation(LinearLayout.VERTICAL);
         layout.setPadding(dp(2), dp(2), dp(2), dp(2));
-        layout.setBackground(rounded(CARD, 16));
+        GradientDrawable background = rounded(CARD, 20);
+        background.setStroke(dp(1), CARD_STROKE);
+        layout.setBackground(background);
         return layout;
     }
 
     private void addDivider(LinearLayout parent) {
         View divider = new View(this);
-        divider.setBackgroundColor(Color.rgb(47, 48, 55));
+        divider.setBackgroundColor(DIVIDER);
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 dp(1)
