@@ -10,3 +10,8 @@
 
 # WorkBuddy workspace data (analysis inputs, screenshots, local scripts)
 /.workbuddy/
+
+# 签名密钥绝不入库 —— 只在 CI 里从 Secrets 还原
+release-key.jks
+*.jks
+*.keystore

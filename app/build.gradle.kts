@@ -18,6 +18,28 @@ android {
         versionName = "1.7.7"
     }
 
+    /*
+     * 固定签名。之前用 signingConfigs.getByName("debug")，CI 每个 runner 都会
+     * 生成新的 ~/.android/debug.keystore —— 每次构建签名都不同，装新包必须先卸载。
+     * 现在和 DouyinDownloader 用同一份 release-key.jks：
+     *   ① 能覆盖安装
+     *   ② 两个 App 签名一致，SharedProvider 的签名校验（① 层）真正生效
+     * 口令从环境变量读（GitHub Secrets），本地没有就退回 debug 签名，不至于编不了。
+     */
+    signingConfigs {
+        create("release") {
+            val keystoreFile = rootProject.file("release-key.jks")
+            val storePass = System.getenv("DOUYIN_STORE_PASSWORD") ?: ""
+            val keyPass = System.getenv("DOUYIN_KEY_PASSWORD") ?: ""
+            if (keystoreFile.exists() && storePass.isNotEmpty() && keyPass.isNotEmpty()) {
+                storeFile = keystoreFile
+                storePassword = storePass
+                keyAlias = "douyin-release"
+                keyPassword = keyPass
+            }
+        }
+    }
+
     buildTypes {
         debug {
             applicationIdSuffix = ".debug"
@@ -30,7 +52,11 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = if (signingConfigs.findByName("release") != null) {
+                signingConfigs.getByName("release")
+            } else {
+                signingConfigs.getByName("debug")
+            }
         }
     }
 

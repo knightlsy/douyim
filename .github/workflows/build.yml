@@ -42,11 +42,39 @@ jobs:
           "$SDKM" "platforms;android-37" "build-tools;37.0.0" 2>&1 | tail -6 || \
           "$SDKM" "platforms;android-36" "build-tools;36.0.0" 2>&1 | tail -6
 
+      # 固定签名密钥：base64 存在 Secrets，构建时还原成 release-key.jks。
+      # 不这么做的话每个 runner 都会生成新的 debug keystore，签名每次不同，
+      # 装新包必须先卸载旧包。
+      - name: Restore signing key
+        env:
+          DOUYIN_KEYSTORE_B64: ${{ secrets.DOUYIN_KEYSTORE_B64 }}
+        run: |
+          if [ -n "$DOUYIN_KEYSTORE_B64" ]; then
+            echo "$DOUYIN_KEYSTORE_B64" | base64 -d > release-key.jks
+            echo "已还原签名密钥（$(stat -c%s release-key.jks) 字节）"
+          else
+            echo "::warning::DOUYIN_KEYSTORE_B64 未配置 —— 本次使用 debug 签名，产物无法覆盖升级"
+          fi
+
       - name: Build release
+        env:
+          DOUYIN_STORE_PASSWORD: ${{ secrets.DOUYIN_STORE_PASSWORD }}
+          DOUYIN_KEY_PASSWORD: ${{ secrets.DOUYIN_KEY_PASSWORD }}
         run: |
           set -o pipefail
           chmod +x gradlew          # git 里的可执行位可能丢，兜底
           ./gradlew --no-daemon assembleRelease 2>&1 | tee build_output.log
+
+      - name: Verify signature
+        if: success()
+        run: |
+          APK=$(find . -name "*-release.apk" -not -name "*unsigned*" | head -1)
+          echo "APK: $APK ($(stat -c%s "$APK") 字节)"
+          BT=$(ls "$ANDROID_SDK_ROOT/build-tools" 2>/dev/null | sort -V | tail -1)
+          if [ -n "$BT" ]; then
+            "$ANDROID_SDK_ROOT/build-tools/$BT/apksigner" verify --print-certs "$APK" 2>/dev/null \
+              | grep -i "SHA-256" | head -1 || echo "(apksigner 未输出证书指纹)"
+          fi
 
       - name: Show errors on failure
         if: failure()
