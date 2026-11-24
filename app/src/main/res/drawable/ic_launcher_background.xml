@@ -1,8 +1,34 @@
 <?xml version="1.0" encoding="utf-8"?>
-<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
-    <gradient
-        android:angle="315"
-        android:centerColor="#FFF1BE"
-        android:endColor="#8FD7D2"
-        android:startColor="#F7B66A" />
-</shape>
+<!--
+  应用图标背景层：橙 → 琥珀 → 青绿 的对角渐变。
+
+  和 DouyinDownloader 是同一套语言（跨色相 + 对角线 + 同轴方向），
+  但起点换成橙色 —— 那边是粉紫，这边是暖橙，并排放能一眼分清谁是谁。
+  两个图标共用「青」这一端收尾，是一家人；起手色不同，是两个东西。
+
+  为什么不用同一色相的三段橙：
+  那在小尺寸下就是一块橙，没有层次，24px 上也看不出是对角光。
+  跨色相才有斜向光谱的读感 —— 这条是下载器图标踩过的坑。
+
+  渐变方向 0,0 → 108,108，与前景图形同轴，像光从左上打下来。
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <path android:pathData="M0,0h108v108h-108z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:type="linear"
+                android:startX="0" android:startY="0"
+                android:endX="108" android:endY="108">
+                <item android:offset="0" android:color="#FFFF7A3A"/>
+                <item android:offset="0.46" android:color="#FFFFB24D"/>
+                <item android:offset="1" android:color="#FF6FD3C7"/>
+            </gradient>
+        </aapt:attr>
+    </path>
+</vector>

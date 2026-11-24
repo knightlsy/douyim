@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  应用图标前景层：实心播放三角 + 右上角加号。
+
+  语义：三角是「抖音 / 视频」，加号是「增强 / 扩展」——
+  这个 App 不是一个独立的播放器，是往抖音里加东西的模块。
+  加号是浏览器扩展那一挂的通用语言，比齿轮或闪电在小尺寸上更立得住
+  （齿轮齿会糊成一圈锯齿，闪电的折角在 24px 下会粘连）。
+
+  几何：
+    · 三角   (40,42) → (40,72) → (66,57)  实心，重心落在视觉中心偏左
+    · 加号   横 M68,36 → 80,36 / 竖 M74,30 → 74,42，strokeWidth 7、butt 帽
+
+  为什么三角用填充而不是描边：
+  描边的三角在小尺寸下内部会透出背景色，2px 的笔画撑不住形体。
+  下载器那边用描边是因为它的符号是线性的（箭头），这边是面性的，就该用填充。
+
+  为什么加号用 butt 帽：
+  和下载器保持同一套「精密仪器」的边角语言 —— 方头切线在抗锯齿后依然锐利。
+
+  安全区：
+  最远点 (80,36)，距中心 (54,54) 为 sqrt(26² + 18²) ≈ 31.6，
+  落在自适应图标 66dp 安全圆（半径 33）内。圆形、方圆、方形遮罩都不会切。
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- 播放三角：实心 -->
+    <path
+        android:pathData="M40,42 L40,72 L66,57 Z"
+        android:fillColor="#FFFFFFFF" />
+
+    <!-- 加号：横 -->
+    <path
+        android:pathData="M68,36 L80,36"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="7"
+        android:strokeLineCap="butt" />
+
+    <!-- 加号：竖 -->
+    <path
+        android:pathData="M74,30 L74,42"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="7"
+        android:strokeLineCap="butt" />
+</vector>
