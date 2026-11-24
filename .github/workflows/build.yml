@@ -20,13 +20,27 @@ jobs:
           distribution: temurin
           java-version: '21'
 
-      - name: Set up Android SDK
+      - name: Probe Android SDK
         run: |
-          # 不依赖 android-actions/setup-android，直接用 runner 自带的 cmdline-tools
-          export ANDROID_HOME=$ANDROID_SDK_ROOT
-          echo "$ANDROID_HOME/cmdline-tools/latest/bin" >> $GITHUB_PATH
-          yes | sdkmanager --licenses > /dev/null 2>&1 || true
-          sdkmanager "platforms;android-37" "build-tools;37.0.0" | tail -5
+          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          SDKM=$(find "${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}" -name sdkmanager -type f 2>/dev/null | head -1)
+          echo "sdkmanager=$SDKM"
+          echo "SDKM=$SDKM" >> $GITHUB_ENV
+          echo "--- 已装 platforms ---"
+          ls "${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}/platforms" 2>/dev/null || echo "(无)"
+          echo "--- 已装 build-tools ---"
+          ls "${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}/build-tools" 2>/dev/null || echo "(无)"
+          echo "--- 仓库里有没有 android-37 ---"
+          "$SDKM" --list 2>/dev/null | grep -E "platforms;android-3[5-9]" | head -10 || echo "(查询失败)"
+
+      - name: Install SDK components
+        run: |
+          set -o pipefail
+          yes | "$SDKM" --licenses > /dev/null 2>&1 || true
+          # compileSdk 37 装不上时退回 36（先试 37）
+          "$SDKM" "platforms;android-37" "build-tools;37.0.0" 2>&1 | tail -6 || \
+          "$SDKM" "platforms;android-36" "build-tools;36.0.0" 2>&1 | tail -6
 
       - name: Build release
         run: |
@@ -38,13 +52,12 @@ jobs:
         run: |
           echo "## 构建失败"
           echo '```'
-          grep -E "^e: |error:|FAILURE|What went wrong|Caused by" -A 4 build_output.log | head -120
+          grep -E "^e: |error:|FAILURE|What went wrong|Caused by|Could not" -A 4 build_output.log | head -120
           echo '```'
 
       - name: Locate APK
         id: find
         run: |
-          # build.gradle 把 buildDirectory 指到了 java.io.tmpdir
           APK=$(find /tmp/douyin-immersive-gradle -name "*.apk" 2>/dev/null | head -1)
           [ -z "$APK" ] && APK=$(find . -name "*.apk" -not -path "./.git/*" | head -1)
           echo "apk=$APK" >> $GITHUB_OUTPUT
