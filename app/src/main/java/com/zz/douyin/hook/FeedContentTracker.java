@@ -305,6 +305,22 @@ final class FeedContentTracker {
                 textValue(invokeNoArg(type, aweme, "getProcessedDesc")),
                 textValue(invokeNoArg(type, aweme, "getEllipsizeDesc"))
         );
+        // 作者昵称与封面：分享给 App 的历史列表需要。
+        // 两步读取（Java 字段名 → 序列化名），与其它字段一致；取不到就留空，
+        // 不要用占位值冒充 —— 界面上空着比显示错误的作者诚实。
+        Object authorObject = readField(type, aweme, "author");
+        if (authorObject == null) {
+            authorObject = readSerializedField(aweme, "author");
+        }
+        String author = "";
+        if (authorObject != null) {
+            author = textValue(readField(authorObject.getClass(), authorObject, "nickname"));
+            if (author.isEmpty()) {
+                author = textValue(readSerializedField(authorObject, "nickname"));
+            }
+        }
+        String coverUrl = coverUrlOf(video);
+
         boolean photo =
                 hostImage
                         || hostMultiImage
@@ -372,10 +388,66 @@ final class FeedContentTracker {
                 photoContent,
                 title,
                 description,
+                author,
+                coverUrl,
                 reason,
                 playUrls,
                 adMarkers
         );
+    }
+
+
+    /**
+     * 从 video 对象里取封面地址。
+     *
+     * 依次试 cover / origin_cover / dynamic_cover —— 不同版本这三个字段的可用性不一样，
+     * 有的版本只填 origin_cover。每个字段都按「Java 字段名 → 序列化名」两步读。
+     */
+    private static String coverUrlOf(Object video) {
+        if (video == null) {
+            return "";
+        }
+        Class<?> videoType = video.getClass();
+        for (String name : new String[]{"cover", "origin_cover", "dynamic_cover"}) {
+            Object cover = readField(videoType, video, name);
+            if (cover == null) {
+                cover = readSerializedField(video, name);
+            }
+            if (cover == null) {
+                continue;
+            }
+            Object list = readField(cover.getClass(), cover, "urlList");
+            if (list == null) {
+                list = readSerializedField(cover, "url_list");
+            }
+            String url = firstStringOf(list);
+            if (!url.isEmpty()) {
+                return url;
+            }
+        }
+        return "";
+    }
+
+    /** 从 List/数组里取第一个非空字符串。 */
+    private static String firstStringOf(Object list) {
+        if (list instanceof java.util.List) {
+            for (Object item : (java.util.List<?>) list) {
+                String value = textValue(item);
+                if (!value.isEmpty()) {
+                    return value;
+                }
+            }
+            return "";
+        }
+        if (list instanceof Object[]) {
+            for (Object item : (Object[]) list) {
+                String value = textValue(item);
+                if (!value.isEmpty()) {
+                    return value;
+                }
+            }
+        }
+        return "";
     }
 
     private static String adMarkerText(
@@ -1128,6 +1200,10 @@ final class FeedContentTracker {
         final boolean photoContent;
         final String title;
         final String description;
+        /** 作者昵称。分享给 DouyinDownloader 的历史列表要用，取不到就是空串。 */
+        final String author;
+        /** 封面地址。同上，取不到留空，不要用占位图冒充。 */
+        final String coverUrl;
         final String filterReason;
         final List<PlayUrl> playUrls;
         final String adMarkers;
@@ -1153,6 +1229,8 @@ final class FeedContentTracker {
                 boolean photoContent,
                 String title,
                 String description,
+                String author,
+                String coverUrl,
                 String filterReason,
                 List<PlayUrl> playUrls,
                 String adMarkers
@@ -1174,6 +1252,8 @@ final class FeedContentTracker {
             this.photoContent = photoContent;
             this.title = title;
             this.description = description;
+            this.author = author;
+            this.coverUrl = coverUrl;
             this.filterReason = filterReason;
             this.playUrls = playUrls;
             this.adMarkers = adMarkers;

@@ -6,6 +6,7 @@ import android.app.AlertDialog;
 import android.content.ContentResolver;
 import android.content.ContentValues;
 import android.content.Context;
+import android.content.Intent;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.media.MediaExtractor;
@@ -174,6 +175,9 @@ final class VideoDownloader {
             }
 
             DownloadResult finalResult = result;
+            if (finalResult.completed || finalResult.queued) {
+                publishHistory(context, snapshot, kind, finalResult.fileName);
+            }
             MAIN.post(() -> {
                 if (finalResult.message != null) {
                     showToast(context, finalResult.message);
@@ -189,6 +193,53 @@ final class VideoDownloader {
                 }
             });
         });
+    }
+
+
+    /**
+     * 把这次下载记进共享历史，供 DouyinDownloader 读取。
+     *
+     * 走显式广播而不是写文件：本模块的 hook 跑在抖音进程里，
+     * 写不了 com.zz.douyin 的应用目录（Android 沙盒）。
+     * 广播失败不影响下载本身 —— 历史只是附加信息。
+     */
+    private static void publishHistory(
+            Context context,
+            FeedContentTracker.Snapshot snapshot,
+            Kind kind,
+            String fileName
+    ) {
+        try {
+            org.json.JSONObject record = new org.json.JSONObject();
+            record.put("id", "xposed-" + snapshot.aid + "-" + System.currentTimeMillis());
+            record.put("contentId", snapshot.aid);
+            record.put("title", firstNonBlankText(snapshot.title, snapshot.description));
+            record.put("author", snapshot.author);
+            record.put("coverUrl", snapshot.coverUrl);
+            record.put("contentType", kind == Kind.IMAGE ? "IMAGE_COLLECTION" : "VIDEO");
+            record.put("originalUrl", "");
+            record.put("downloadTime", System.currentTimeMillis());
+            org.json.JSONArray files = new org.json.JSONArray();
+            if (fileName != null && !fileName.isEmpty()) {
+                files.put(fileName);
+            }
+            record.put("downloadedFiles", files);
+            record.put("source", "xposed");
+
+            Intent intent = new Intent("com.zz.douyin.SHARED_HISTORY");
+            intent.setPackage("com.zz.douyin");
+            intent.putExtra("json", record.toString());
+            context.sendBroadcast(intent);
+        } catch (Throwable error) {
+            Log.w(DouyinModule.TAG, "publishHistory failed", error);
+        }
+    }
+
+    private static String firstNonBlankText(String first, String second) {
+        if (first != null && !first.isEmpty()) {
+            return first;
+        }
+        return second == null ? "" : second;
     }
 
     private static DownloadResult downloadImages(

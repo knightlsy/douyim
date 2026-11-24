@@ -17,5 +17,33 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!--
+          把模块下载过的作品记录暴露给 DouyinDownloader。
+
+          故意不设 android:permission —— 两个 App 签名不同，signature 级权限用不了。
+          安全靠 SharedProvider 内部的双层校验：
+            ① 调用方签名与本应用一致 → 放行
+            ② 签名不同但包名在白名单 → 放行
+            ③ 其余 → 返回 null 并记日志
+          getCallingPackage() 由系统填写，应用无法伪装成别的包名。
+        -->
+        <provider
+            android:name=".SharedProvider"
+            android:authorities="com.zz.douyin.shared"
+            android:exported="true"
+            android:grantUriPermissions="false" />
+
+        <!--
+          抖音进程 → 本应用的历史投递口。
+          模块的 hook 跑在抖音进程里，写不了本应用的文件，只能走显式广播。
+        -->
+        <receiver
+            android:name=".HistoryReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.zz.douyin.SHARED_HISTORY" />
+            </intent-filter>
+        </receiver>
     </application>
 </manifest>
