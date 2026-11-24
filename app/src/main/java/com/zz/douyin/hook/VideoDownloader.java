@@ -291,6 +291,32 @@ final class VideoDownloader {
                     String fileName = total == 1
                             ? baseName + extensionOf(normalized.mime)
                             : baseName + '_' + position + extensionOf(normalized.mime);
+                    if (image.isLive()) {
+                        // 实况图：只存静帧等于把动态效果丢了。
+                        // 合成失败就退回静态图 —— 有张图总比报错好，但要留下日志。
+                        try {
+                            File liveFile = buildLivePhoto(context, prepared, image.liveVideoUrl);
+                            String liveName = total == 1
+                                    ? baseName + "_live.jpg"
+                                    : baseName + '_' + position + "_live.jpg";
+                            publishFile(context, liveFile, liveName, "image/jpeg");
+                            // 先取大小再删 —— 反过来日志里永远是 bytes=0
+                            long liveSize = liveFile.length();
+                            if (!liveFile.delete()) {
+                                Log.w(DouyinModule.TAG, "could not delete muxed live photo temp");
+                            }
+                            Log.i(DouyinModule.TAG,
+                                    "live photo saved: index=" + position + "/" + total
+                                            + " bytes=" + liveSize
+                                            + " file=" + liveName);
+                            saved++;
+                            savedThis = true;
+                            break;
+                        } catch (Exception liveError) {
+                            Log.w(DouyinModule.TAG,
+                                    "实况合成失败，退回静态图 index=" + position, liveError);
+                        }
+                    }
                     publishFile(context, prepared, fileName, normalized.mime);
                     Log.i(DouyinModule.TAG,
                             "image saved: index=" + position + "/" + total
@@ -337,6 +363,88 @@ final class VideoDownloader {
     }
 
     /** 图片先解码校验，AVIF/HEIC 转成 JPEG，避免相册把合法图片显示成乱码。 */
+
+    /**
+     * 把静图与实况视频合成一张动态照片。
+     *
+     * 单独走一个下载函数而不是复用 downloadToFile —— 后者写死了
+     * `Accept: image/jpeg,...`，拿它下 mp4 会被 CDN 拒绝或返回错误内容。
+     */
+    private static File buildLivePhoto(Context context, File jpeg, String videoUrl)
+            throws IOException {
+        File mp4 = File.createTempFile("douxianren-live-", ".mp4", context.getCacheDir());
+        File out = File.createTempFile("douxianren-livejpg-", ".jpg", context.getCacheDir());
+        try {
+            downloadBinary(videoUrl, mp4, "video/mp4,video/*;q=0.9,*/*;q=0.5");
+            byte[] mp4Bytes = readAllBytes(mp4);
+            if (mp4Bytes.length < 1024) {
+                // 太小的多半是错误页或空响应，拼进去只会得到一张打不开的图
+                throw new IOException("实况视频数据异常（" + mp4Bytes.length + " 字节）");
+            }
+            byte[] muxed = MotionPhotoMuxer.mux(readAllBytes(jpeg), mp4Bytes);
+            try (OutputStream output = new FileOutputStream(out)) {
+                output.write(muxed);
+            }
+            return out;
+        } catch (IOException error) {
+            if (!out.delete()) {
+                Log.w(DouyinModule.TAG, "清理未完成的实况文件失败");
+            }
+            throw error;
+        } finally {
+            if (!mp4.delete()) {
+                Log.w(DouyinModule.TAG, "清理临时实况视频失败");
+            }
+        }
+    }
+
+    /** 按指定 Accept 下载二进制内容。 */
+    private static void downloadBinary(String url, File target, String accept)
+            throws IOException {
+        HttpURLConnection connection = null;
+        try {
+            connection = openConnection(url, true);
+            connection.setRequestProperty("Accept", accept);
+            int status = connection.getResponseCode();
+            if (status < 200 || status >= 300) {
+                throw new IOException("HTTP " + status);
+            }
+            try (InputStream input = connection.getInputStream();
+                 OutputStream output = new FileOutputStream(target)) {
+                long bytes = copy(input, output);
+                if (bytes <= 0) {
+                    throw new IOException("响应为空");
+                }
+            }
+        } finally {
+            if (connection != null) {
+                connection.disconnect();
+            }
+        }
+    }
+
+    private static byte[] readAllBytes(File file) throws IOException {
+        long length = file.length();
+        if (length <= 0 || length > Integer.MAX_VALUE) {
+            throw new IOException("文件大小异常：" + length);
+        }
+        byte[] data = new byte[(int) length];
+        try (InputStream input = new FileInputStream(file)) {
+            int offset = 0;
+            while (offset < data.length) {
+                int read = input.read(data, offset, data.length - offset);
+                if (read < 0) {
+                    break;
+                }
+                offset += read;
+            }
+            if (offset != data.length) {
+                throw new IOException("读取不完整：" + offset + "/" + data.length);
+            }
+        }
+        return data;
+    }
+
     private static PreparedImage normalizeImage(
             Context context,
             File source,

@@ -403,6 +403,44 @@ final class FeedContentTracker {
      * 依次试 cover / origin_cover / dynamic_cover —— 不同版本这三个字段的可用性不一样，
      * 有的版本只填 origin_cover。每个字段都按「Java 字段名 → 序列化名」两步读。
      */
+
+    /**
+     * 取实况图的动态部分地址。
+     *
+     * 抖音结构：`images[i].video.play_addr.url_list[]`（序列化名 `play_addr`）。
+     * 普通图片没有 video 字段，返回 null。
+     *
+     * 注意这里找的是 `images[i].video`，跟作品级的 `aweme.video` 不是一回事 ——
+     * 后者是视频作品本身的地址，后者在实况图里指的是封面动画。
+     */
+    private static String liveVideoUrlOf(Object imageItem) {
+        if (imageItem == null) {
+            return null;
+        }
+        Class<?> type = imageItem.getClass();
+        Object video = readField(type, imageItem, "video");
+        if (video == null) {
+            video = readSerializedField(imageItem, "video");
+        }
+        if (video == null) {
+            return null;
+        }
+        Class<?> videoType = video.getClass();
+        Object playAddr = readField(videoType, video, "playAddr");
+        if (playAddr == null) {
+            playAddr = readSerializedField(video, "play_addr");
+        }
+        if (playAddr == null) {
+            return null;
+        }
+        Object list = readField(playAddr.getClass(), playAddr, "urlList");
+        if (list == null) {
+            list = readSerializedField(playAddr, "url_list");
+        }
+        String url = firstStringOf(list);
+        return url.isEmpty() ? null : url;
+    }
+
     private static String coverUrlOf(Object video) {
         if (video == null) {
             return "";
@@ -941,7 +979,7 @@ final class FeedContentTracker {
             if (urls.isEmpty() || !seen.add(urls.get(0))) {
                 continue;
             }
-            output.add(new ImageUrl(urls, source));
+            output.add(new ImageUrl(urls, source, liveVideoUrlOf(item)));
         }
     }
 
@@ -1322,10 +1360,28 @@ final class FeedContentTracker {
         /** 同一张图的多个镜像地址，按优先顺序排列。 */
         final List<String> urls;
         final String source;
+        /**
+         * 实况图（Live Photo）的动态部分地址，普通图片为 null。
+         *
+         * 抖音把实况图存在 `images[i].video.play_addr.url_list`，
+         * 只下载 urls 会得到一张静态帧 —— 动态效果就丢了。
+         * 拿到这个地址才能合成真正的动态照片。
+         */
+        final String liveVideoUrl;
 
-        ImageUrl(List<String> urls, String source) {
+        ImageUrl(List<String> urls, String source, String liveVideoUrl) {
             this.urls = Collections.unmodifiableList(new ArrayList<>(urls));
             this.source = source;
+            this.liveVideoUrl = liveVideoUrl;
+        }
+
+        ImageUrl(List<String> urls, String source) {
+            this(urls, source, null);
+        }
+
+        /** 是否是实况图。 */
+        boolean isLive() {
+            return liveVideoUrl != null && !liveVideoUrl.isEmpty();
         }
 
         String primary() {
