@@ -25,6 +25,7 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
+import java.util.Locale;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
@@ -227,7 +228,10 @@ final class VideoDownloader {
             record.put("source", "xposed");
 
             Intent intent = new Intent("com.zz.douyin.SHARED_HISTORY");
-            intent.setPackage("com.zz.douyin");
+            // 用实际 applicationId 而不是写死 "com.zz.douyin"：
+            // debug 变体的包名是 com.zz.douyin.debug，写死的话广播发到一个
+            // 不存在的包，接收端静默收不到，历史一条都到不了。
+            intent.setPackage(com.zz.douyin.BuildConfig.APPLICATION_ID);
             intent.putExtra("json", record.toString());
             context.sendBroadcast(intent);
         } catch (Throwable error) {
@@ -291,7 +295,16 @@ final class VideoDownloader {
                     String fileName = total == 1
                             ? baseName + extensionOf(normalized.mime)
                             : baseName + '_' + position + extensionOf(normalized.mime);
-                    if (image.isLive()) {
+                    // 主图必须是 JPEG 才能合成 —— PNG/GIF 进来 mux 会把 FFE1 段
+                    // 硬塞进 PNG 流，产出一个打不开的文件。Kotlin 原版有
+                    // ext == "jpg" 守卫，移植时漏掉了。
+                    boolean canMuxLive = image.isLive()
+                            && "image/jpeg".equals(normalized.mime);
+                    if (image.isLive() && !canMuxLive) {
+                        Log.w(DouyinModule.TAG,
+                                "实况图主图不是 JPEG（" + normalized.mime + "），跳过动态合成");
+                    }
+                    if (canMuxLive) {
                         // 实况图：只存静帧等于把动态效果丢了。
                         // 合成失败就退回静态图 —— 有张图总比报错好，但要留下日志。
                         try {
@@ -312,7 +325,11 @@ final class VideoDownloader {
                             saved++;
                             savedThis = true;
                             break;
-                        } catch (Exception liveError) {
+                        } catch (Exception | OutOfMemoryError liveError) {
+                            // 必须连 OutOfMemoryError 一起接：全内存合成时大实况视频会撑爆堆，
+                            // 那是个 Error 不是 Exception。漏掉它的话不会退回静态图，
+                            // 而是把整张图判失败、换下一个镜像重试 —— 对同一张大图
+                            // 再走一遍全内存路径，可能连环 OOM。
                             Log.w(DouyinModule.TAG,
                                     "实况合成失败，退回静态图 index=" + position, liveError);
                         }
@@ -377,9 +394,11 @@ final class VideoDownloader {
         try {
             downloadBinary(videoUrl, mp4, "video/mp4,video/*;q=0.9,*/*;q=0.5");
             byte[] mp4Bytes = readAllBytes(mp4);
-            if (mp4Bytes.length < 1024) {
-                // 太小的多半是错误页或空响应，拼进去只会得到一张打不开的图
-                throw new IOException("实况视频数据异常（" + mp4Bytes.length + " 字节）");
+            // 只判大小是不够的：CDN 的错误页动辄几十 KB，靠 >1KB 拦不住。
+            // 看 ftyp 盒才是真的在验「这是不是 MP4」。
+            if (!MotionPhotoMuxer.looksLikeMp4(mp4Bytes)) {
+                throw new IOException("实况视频不是 MP4（" + mp4Bytes.length
+                        + " 字节，缺少 ftyp 盒）");
             }
             byte[] muxed = MotionPhotoMuxer.mux(readAllBytes(jpeg), mp4Bytes);
             try (OutputStream output = new FileOutputStream(out)) {
@@ -401,31 +420,47 @@ final class VideoDownloader {
     /** 按指定 Accept 下载二进制内容。 */
     private static void downloadBinary(String url, File target, String accept)
             throws IOException {
-        HttpURLConnection connection = null;
-        try {
-            connection = openConnection(url, true);
-            connection.setRequestProperty("Accept", accept);
-            int status = connection.getResponseCode();
-            if (status < 200 || status >= 300) {
-                throw new IOException("HTTP " + status);
-            }
-            try (InputStream input = connection.getInputStream();
-                 OutputStream output = new FileOutputStream(target)) {
-                long bytes = copy(input, output);
-                if (bytes <= 0) {
-                    throw new IOException("响应为空");
+        IOException lastError = null;
+        // 两个 UA 都试：CDN 对抖音 UA 有时返回 200 的网页而不是视频，
+        // 换浏览器 UA 往往就正常了。downloadToFile 早就是这么做的，这里对齐。
+        for (boolean appAgent : new boolean[]{true, false}) {
+            HttpURLConnection connection = null;
+            try {
+                connection = openConnection(url, appAgent);
+                connection.setRequestProperty("Accept", accept);
+                int status = connection.getResponseCode();
+                if (status < 200 || status >= 300) {
+                    throw new IOException("HTTP " + status);
+                }
+                String contentType = connection.getContentType();
+                if (contentType != null
+                        && contentType.toLowerCase(Locale.ROOT).contains("text/html")) {
+                    throw new IOException("返回的是网页不是视频：" + contentType);
+                }
+                try (InputStream input = connection.getInputStream();
+                     OutputStream output = new FileOutputStream(target)) {
+                    long bytes = copy(input, output);
+                    if (bytes <= 0) {
+                        throw new IOException("响应为空");
+                    }
+                }
+                return;
+            } catch (IOException error) {
+                lastError = error;
+            } finally {
+                if (connection != null) {
+                    connection.disconnect();
                 }
             }
-        } finally {
-            if (connection != null) {
-                connection.disconnect();
-            }
         }
+        throw lastError == null ? new IOException("实况视频下载失败") : lastError;
     }
 
     private static byte[] readAllBytes(File file) throws IOException {
         long length = file.length();
-        if (length <= 0 || length > Integer.MAX_VALUE) {
+        // 128MB 上限：实况视频正常只有几百 KB 到几 MB，
+        // 超过这个量级必然是异常响应，直接拒掉比 OOM 好。
+        if (length <= 0 || length > 128L * 1024 * 1024) {
             throw new IOException("文件大小异常：" + length);
         }
         byte[] data = new byte[(int) length];

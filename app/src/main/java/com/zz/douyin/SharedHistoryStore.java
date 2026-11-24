@@ -37,6 +37,13 @@ final class SharedHistoryStore {
     /** 保留的最大行数。历史是参考信息，不需要无限增长。 */
     private static final int MAX_LINES = 2000;
 
+    /**
+     * 单条记录上限。广播 extra 能塞到几百 KB，不设限的话第三方应用循环发大包
+     * 就能把本应用私有目录写到用户清不掉（只有卸载或清数据能回收）。
+     * 正常记录十几个字段加起来不到 2KB，16KB 留了充足余量。
+     */
+    private static final int MAX_RECORD_BYTES = 16 * 1024;
+
     private SharedHistoryStore() {
     }
 
@@ -58,12 +65,23 @@ final class SharedHistoryStore {
         if (jsonLine == null || jsonLine.trim().isEmpty()) {
             return;
         }
+        if (jsonLine.getBytes(StandardCharsets.UTF_8).length > MAX_RECORD_BYTES) {
+            Log.w(TAG, "历史记录超过 " + MAX_RECORD_BYTES + " 字节，丢弃");
+            return;
+        }
+
+        String line;
         try {
             JSONObject object = new JSONObject(jsonLine);
             if (object.optString("id").isEmpty() || object.optString("contentId").isEmpty()) {
                 Log.w(TAG, "历史记录缺少 id/contentId，丢弃");
                 return;
             }
+            // 落盘用重新序列化的结果，不是原始串。
+            // org.json 解析字符串字面量里的裸控制字符是宽容的 —— 原始串里塞一个
+            // 真实的换行，就能让一条广播在 JSONL 里变成多行，后续那些行完全绕过
+            // 上面的字段校验，直接成为独立记录。重新序列化会把换行转义成 \n。
+            line = object.toString();
         } catch (Exception error) {
             Log.w(TAG, "历史记录不是合法 JSON，丢弃", error);
             return;
@@ -72,7 +90,7 @@ final class SharedHistoryStore {
         File target = file(context);
         try (OutputStreamWriter writer = new OutputStreamWriter(
                 new FileOutputStream(target, true), StandardCharsets.UTF_8)) {
-            writer.write(jsonLine.trim());
+            writer.write(line);
             writer.write('\n');
             writer.flush();
         } catch (Exception error) {

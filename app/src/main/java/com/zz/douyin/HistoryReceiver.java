@@ -5,6 +5,9 @@ import android.content.Context;
 import android.content.Intent;
 import android.util.Log;
 
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+
 /**
  * 抖音进程 → 本应用进程的历史投递通道。
  *
@@ -22,6 +25,15 @@ public final class HistoryReceiver extends BroadcastReceiver {
     static final String ACTION = "com.zz.douyin.SHARED_HISTORY";
     static final String EXTRA_JSON = "json";
 
+    /**
+     * 单线程写入队列。
+     *
+     * 原来每条广播都 new Thread —— 被刷时线程数没有上限，且 onReceive 一 return
+     * 系统就认为接收完成，进程随时可能被回收，work 还没落盘就丢了（静默丢数据，
+     * 连日志都没有）。单线程池顺带保证写入顺序。
+     */
+    private static final ExecutorService WRITER = Executors.newSingleThreadExecutor();
+
     @Override
     public void onReceive(Context context, Intent intent) {
         if (intent == null || !ACTION.equals(intent.getAction())) {
@@ -31,15 +43,25 @@ public final class HistoryReceiver extends BroadcastReceiver {
         if (json == null || json.trim().isEmpty()) {
             return;
         }
-        // 广播是在主线程回调的，写盘放到自己的一次性线程里，不阻塞系统广播队列
+        // goAsync 把进程的存活窗口延长到 finish() 为止，写盘期间不会被系统回收；
+        // 写盘本身放到单线程池，不阻塞广播主线程。
+        final PendingResult pending = goAsync();
         final Context appContext = context.getApplicationContext();
-        new Thread(() -> {
-            try {
-                SharedHistoryStore.append(appContext, json);
-                Log.i("DouyinShared", "收到模块下载记录");
-            } catch (Throwable error) {
-                Log.w("DouyinShared", "投递历史失败", error);
-            }
-        }, "shared-history-write").start();
+        try {
+            WRITER.execute(() -> {
+                try {
+                    SharedHistoryStore.append(appContext, json);
+                    Log.i("DouyinShared", "收到模块下载记录");
+                } catch (Throwable error) {
+                    Log.w("DouyinShared", "投递历史失败", error);
+                } finally {
+                    pending.finish();
+                }
+            });
+        } catch (Throwable error) {
+            // 队列满/已关闭：必须 finish，否则系统一直认为这个广播没处理完
+            pending.finish();
+            Log.w("DouyinShared", "无法排入写入队列", error);
+        }
     }
 }

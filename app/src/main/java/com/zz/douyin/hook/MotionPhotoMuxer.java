@@ -41,6 +41,16 @@ final class MotionPhotoMuxer {
      * @return 合成后的字节，直接以 .jpg 落盘，相册会识别出动态效果
      */
     static byte[] mux(byte[] jpegBytes, byte[] mp4Bytes) {
+        // 入口校验。不校验的后果不是报错，是产出一个打不开的文件 ——
+        // 调用方拿到损坏图还当成功了，用户相册里躺一张裂图。
+        // 这里抛 IllegalArgumentException（RuntimeException），调用方 catch 后走静态图兜底。
+        if (jpegBytes == null || jpegBytes.length < 4
+                || (jpegBytes[0] & 0xFF) != 0xFF || (jpegBytes[1] & 0xFF) != 0xD8) {
+            throw new IllegalArgumentException("主图不是 JPEG（缺少 FFD8 SOI）");
+        }
+        if (!looksLikeMp4(mp4Bytes)) {
+            throw new IllegalArgumentException("动态部分不是 MP4（缺少 ftyp 盒）");
+        }
         byte[] jpegWithXmp = injectXmp(jpegBytes, mp4Bytes.length);
         ByteArrayOutputStream out =
                 new ByteArrayOutputStream(jpegWithXmp.length + mp4Bytes.length);
@@ -78,7 +88,11 @@ final class MotionPhotoMuxer {
         int index = 2;
         while (index + 1 < jpeg.length) {
             if ((jpeg[index] & 0xFF) != 0xFF) {
-                break; // 结构不合预期，余下原样写
+                // 结构不合预期：余下字节必须原样补进输出。
+                // 原来这里只 break，注释写着「余下原样写」但实际一个字节都没写 ——
+                // 输出被截断，图打不开。
+                out.write(jpeg, index, jpeg.length - index);
+                return finishXmp(out, app1);
             }
             int marker = jpeg[index + 1] & 0xFF;
             if (marker == 0xDA) {
@@ -98,7 +112,9 @@ final class MotionPhotoMuxer {
                 continue;
             }
             if (index + 3 >= jpeg.length) {
-                break;
+                // 剩余不足一个段的头部，同样是原样补出去
+                out.write(jpeg, index, jpeg.length - index);
+                return finishXmp(out, app1);
             }
             int segLen = ((jpeg[index + 2] & 0xFF) << 8) | (jpeg[index + 3] & 0xFF);
             if (segLen < 2 || index + 2 + segLen > jpeg.length) {
@@ -121,6 +137,22 @@ final class MotionPhotoMuxer {
             index += 2 + segLen;
         }
         return finishXmp(out, app1);
+    }
+
+    /**
+     * 粗判 MP4：第 4..7 字节是 'ftyp'。
+     *
+     * 只靠「文件大于 1KB」是不够的 —— CDN 对抖音 UA 返回的 HTML 错误页
+     * 通常远超 1KB，被拼进去之后 XMP offset 指向的是网页而不是 ftyp，
+     * 相册只会显示静态图，而且不会有任何报错。
+     */
+    static boolean looksLikeMp4(byte[] data) {
+        return data != null
+                && data.length >= 12
+                && data[4] == 'f'
+                && data[5] == 't'
+                && data[6] == 'y'
+                && data[7] == 'p';
     }
 
     /** 把新 XMP 段插到 SOI 之后、其余所有段之前。 */
