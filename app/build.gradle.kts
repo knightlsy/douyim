@@ -64,6 +64,16 @@ android {
         }
     }
 
+    /*
+     * AGP 8+ 默认不生成 BuildConfig。这里需要它是为了拿到**本模块自己的**包名：
+     * hook 代码跑在抖音进程里，拿到的 Context 是抖音的，
+     * context.getPackageName() 返回 com.ss.android.ugc.aweme —— 广播就发错人了。
+     * 只有编译期的 BuildConfig.APPLICATION_ID 才是模块自己的包名。
+     */
+    buildFeatures {
+        buildConfig = true
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
