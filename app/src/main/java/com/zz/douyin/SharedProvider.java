@@ -3,13 +3,11 @@ package com.zz.douyin;
 import android.content.ContentProvider;
 import android.content.ContentValues;
 import android.content.Context;
-import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
-import android.content.pm.Signature;
 import android.database.Cursor;
 import android.database.MatrixCursor;
 import android.net.Uri;
-import android.os.Build;
+import android.os.Binder;
 import android.util.Log;
 
 import org.json.JSONArray;
@@ -65,10 +63,11 @@ public final class SharedProvider extends ContentProvider {
                         String selection,
                         String[] selectionArgs,
                         String sortOrder) {
-        String caller = getCallingPackage();
+        String caller = resolveCaller();
         String trust = trustLevel(caller);
         if (trust == null) {
-            Log.w(TAG, "拒绝未授权的读取: " + caller);
+            Log.w(TAG, "拒绝未授权的读取: caller=" + caller
+                    + " uid=" + Binder.getCallingUid());
             return null;
         }
         Log.i(TAG, "允许读取共享历史，调用方=" + caller + " 信任等级=" + trust);
@@ -118,6 +117,37 @@ public final class SharedProvider extends ContentProvider {
         return builder.toString();
     }
 
+    /**
+     * 解析调用方包名。
+     *
+     * 先用 getCallingPackage()；它在某些 IPC 路径下会返回 null（文档明说 may be null），
+     * 只依赖它会让合法调用方被误拒 —— 表现就是界面上「已安装 · 读不到数据」，
+     * 而且没有任何线索指出是身份解析失败。
+     * 所以再退到 Binder.getCallingUid() + getPackagesForUid()，这两步不依赖调用栈。
+     */
+    private String resolveCaller() {
+        String caller = getCallingPackage();
+        if (caller != null && !caller.isEmpty()) {
+            return caller;
+        }
+        try {
+            int uid = Binder.getCallingUid();
+            Context context = getContext();
+            if (context == null) {
+                return null;
+            }
+            String[] packages = context.getPackageManager().getPackagesForUid(uid);
+            if (packages != null && packages.length > 0) {
+                Log.i(TAG, "getCallingPackage 为 null，改用 uid=" + uid
+                        + " 解析出 " + packages[0]);
+                return packages[0];
+            }
+        } catch (Exception error) {
+            Log.w(TAG, "uid 解析调用方失败", error);
+        }
+        return null;
+    }
+
     /** @return 信任等级描述；null 表示拒绝 */
     private String trustLevel(String caller) {
         if (caller == null) {
@@ -132,41 +162,29 @@ public final class SharedProvider extends ContentProvider {
         return null;
     }
 
-    /** 调用方签名是否与本应用完全一致。任何异常都当作不匹配。 */
+    /**
+     * 调用方签名是否与本应用一致。
+     *
+     * 用 PackageManager.checkSignatures() 而不是手写数组比较：
+     * 多签名者时 getApkContentsSigners() 的顺序不是稳定契约，
+     * 逐位比较同一组签名也可能返回 false（误拒）。
+     * checkSignatures 就是为这个场景设计的，只看集合关系。
+     */
     private boolean signatureMatches(String caller) {
         Context context = getContext();
         if (context == null) {
             return false;
         }
         try {
-            PackageManager manager = context.getPackageManager();
-            Signature[] self = signaturesOf(manager, context.getPackageName());
-            Signature[] theirs = signaturesOf(manager, caller);
-            if (self == null || theirs == null || self.length == 0 || theirs.length == 0) {
-                return false;
-            }
-            return Arrays.equals(self, theirs);
+            return context.getPackageManager()
+                    .checkSignatures(context.getPackageName(), caller)
+                    == PackageManager.SIGNATURE_MATCH;
         } catch (Exception error) {
+            Log.d(TAG, "签名比较失败 caller=" + caller, error);
             return false;
         }
     }
 
-    private static Signature[] signaturesOf(PackageManager manager, String packageName)
-            throws PackageManager.NameNotFoundException {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            PackageInfo info = manager.getPackageInfo(
-                    packageName, PackageManager.GET_SIGNING_CERTIFICATES);
-            if (info.signingInfo == null) {
-                return null;
-            }
-            return info.signingInfo.hasMultipleSigners()
-                    ? info.signingInfo.getApkContentsSigners()
-                    : info.signingInfo.getSigningCertificateHistory();
-        }
-        PackageInfo info = manager.getPackageInfo(
-                packageName, PackageManager.GET_SIGNATURES);
-        return info.signatures;
-    }
 
     /* ── 只读 Provider：其余操作一律拒绝 ── */
 
