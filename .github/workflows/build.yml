@@ -45,6 +45,7 @@ jobs:
       - name: Build release
         run: |
           set -o pipefail
+          chmod +x gradlew          # git 里的可执行位可能丢，兜底
           ./gradlew --no-daemon assembleRelease 2>&1 | tee build_output.log
 
       - name: Show errors on failure
