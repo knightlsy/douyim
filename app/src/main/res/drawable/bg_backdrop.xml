@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  与 DouyinDownloader 的 BgBackdrop 对齐：纸色打底 + 两团无边界暖光。
+  这层不只是装饰 —— 上面的半透明卡片要靠它才「透」得出色温，否则就是一块灰膜。
+  径向渐变是没有边界的，所以不需要 blur 也看不出生硬的圆圈。
+-->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item>
+        <shape>
+            <solid android:color="@color/bg_base" />
+        </shape>
+    </item>
+    <item>
+        <shape>
+            <gradient
+                android:type="radial"
+                android:centerX="0.18"
+                android:centerY="0.08"
+                android:gradientRadius="620dp"
+                android:startColor="@color/bg_glow_warm"
+                android:endColor="#00000000" />
+        </shape>
+    </item>
+    <item>
+        <shape>
+            <gradient
+                android:type="radial"
+                android:centerX="0.92"
+                android:centerY="0.72"
+                android:gradientRadius="520dp"
+                android:startColor="@color/bg_glow_warm"
+                android:endColor="#00000000" />
+        </shape>
+    </item>
+</layer-list>

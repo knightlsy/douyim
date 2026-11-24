@@ -103,14 +103,15 @@ public final class MainActivity extends Activity
     private View buildContent() {
         ScrollView scroll = new ScrollView(this);
         scroll.setFillViewport(true);
-        scroll.setBackgroundColor(BACKGROUND);
+        // 纸色打底 + 暖光：半透明卡片靠这层才透得出色温
+        scroll.setBackgroundResource(R.drawable.bg_backdrop);
 
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setPadding(dp(20), dp(32), dp(20), dp(32));
         scroll.addView(root, matchWrap());
 
-        TextView title = text("抖仙人", 28, TEXT_PRIMARY);
+        TextView title = text("抖仙人", 24, TEXT_PRIMARY);
         title.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
         root.addView(title, matchWrap());
 
@@ -229,7 +230,7 @@ public final class MainActivity extends Activity
                         | InputType.TYPE_TEXT_FLAG_MULTI_LINE
                         | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
         );
-        GradientDrawable inputBackground = rounded(CHIP_IDLE, 12);
+        GradientDrawable inputBackground = rounded(CHIP_IDLE, 16);
         inputBackground.setStroke(dp(1), INPUT_STROKE);
         keywordInput.setBackground(inputBackground);
         keywordInput.setPadding(dp(14), dp(12), dp(14), dp(12));
@@ -242,7 +243,7 @@ public final class MainActivity extends Activity
         saveKeywords.setTextColor(Color.WHITE);
         saveKeywords.setTextSize(15);
         saveKeywords.setAllCaps(false);
-        saveKeywords.setBackground(rounded(PRIMARY, 12));
+        saveKeywords.setBackground(rounded(PRIMARY, 16));
         saveKeywords.setOnClickListener(view -> saveKeywordSettings());
         LinearLayout.LayoutParams buttonParams = matchWrap();
         buttonParams.topMargin = dp(14);
