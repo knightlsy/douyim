@@ -52,7 +52,11 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            signingConfig = if (signingConfigs.findByName("release") != null) {
+            // 注意判断条件：create("release") 之后 findByName 永远非 null，
+            // 拿它当条件会在「口令没配」时选中一个空配置，打包直接报
+            // "SigningConfig release is missing required property storeFile"。
+            // 必须看 storeFile 到底有没有赋值。
+            signingConfig = if (signingConfigs.getByName("release").storeFile != null) {
                 signingConfigs.getByName("release")
             } else {
                 signingConfigs.getByName("debug")
